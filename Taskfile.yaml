@@ -1,0 +1,1139 @@
+version: "3"
+
+vars:
+  GO_EXCLUDE_PATHS: '-not -path "./vendor/*" -not -path "./cdk.out/*" -not -path "./app-plane/infra/cdk.out/*" -not -path "./docs/*"  -not -path "./*/testdata/*" -not -path "./app-plane/infra/lambdas/*"'
+  GO_EXCLUDE_OTHER_PATHS: '-not -path "./vendor/*" -not -path "./cdk.out/*" -not -path "./app-plane/*" -not -path "./docs/*"  -not -path "./*/testdata/*"'
+  GO_EXCLUDE_APP_PLANE_PATHS: '-not -path "./app-plane/infra/cdk.out/*" -not -path "./app-plane/*/testdata/*" -not -path "./app-plane/infra/lambdas/*"'
+  PY_EXCLUDE_PATHS: '-not -path "./venv/*" -not -path "./cdk.out/*" -not -path "./app-plane/infra/cdk.out/*" -not -path "./docs/*"'
+  DOTNET_EXCLUDE_PATHS: '-not -path "*/node_modules/*" -not -path "*/.aws-sam/*" -not -path "*/bin/*" -not -path "*/obj/*"'
+  GO_NUM_PARALLEL: "8"
+
+tasks:
+  go-install-tools:
+    desc: Install tools for go code in this project
+    cmds:
+      # Format Go code consistently with stricter rules than gofmt
+      - go install mvdan.cc/gofumpt@latest
+
+      # Organize Go import statements by grouping and sorting
+      - go install github.com/daixiang0/gci@latest
+
+      # Run fast, configurable linters for Go code quality
+      - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+      # Enhanced output for 'go test' with summaries and test filtering
+      - go install gotest.tools/gotestsum@latest
+
+      # Generate Go types from .proto files (protobuf support)
+      - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+      # Generate gRPC client and server code from .proto files
+      - go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      # Visualize CPU and memory profiling data
+      - go install github.com/google/pprof@latest
+
+      # Generate String() methods from Go constants/enums
+      - go install golang.org/x/tools/cmd/stringer@latest
+
+      # Format Go imports automatically (used by many editors/tools)
+      - go install golang.org/x/tools/cmd/goimports@latest
+
+      # Merge multiple Go coverage profiles into one
+      - go install github.com/wadey/gocovmerge@latest > /dev/null 2>&1
+
+      # Auto-wrap long Go lines while keeping formatting clean
+      - go install github.com/segmentio/golines@latest
+
+      # Like jq, but for YAML: read/edit YAML from the command line
+      - go install github.com/mikefarah/yq/v4@latest
+
+      # HTML templating engine for Go (similar to React/JSX)
+      - go install github.com/a-h/templ/cmd/templ@latest
+
+      # Live-reloading for Go applications (KUBERNETES SERVICES ONLY)
+      - go install github.com/air-verse/air@latest
+    silent: true
+
+  dotnet-install-tools:
+    desc: Install tools for .NET code in this project
+    preconditions:
+      - sh: command -v dotnet >/dev/null 2>&1
+        msg: |
+          .NET SDK is not installed. Please install .NET 10 SDK first:
+            https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+    cmds:
+      - dotnet new install Amazon.Lambda.Templates
+      - dotnet tool update -g Amazon.Lambda.Tools || dotnet tool install -g Amazon.Lambda.Tools
+
+  build:
+    desc: Build the entire project
+    deps:
+      - go-build
+      - python-build
+      - js-build
+      - dotnet-build
+
+  lint:
+    desc: Lint the entire project
+    deps:
+      - go-lint
+      - python-lint
+      - js-lint
+      - dotnet-lint
+      - markdown-lint
+
+  js-install-tools:
+    desc: Install tools for JS/TS code in this project
+    preconditions:
+      - sh: command -v node >/dev/null 2>&1
+        msg: |
+          Node.js is not installed. Please install Node.js first:
+            macOS:   brew install node
+            Linux:   Use your package manager or https://github.com/nvm-sh/nvm
+            Windows: Download from https://nodejs.org
+      - sh: command -v npm >/dev/null 2>&1
+        msg: |
+          npm is not installed (should come with Node.js). Please reinstall Node.js:
+            macOS:   brew install node
+            Linux:   Use your package manager or https://github.com/nvm-sh/nvm
+            Windows: Download from https://nodejs.org
+    cmds:
+      # Display Node.js and npm versions
+      - echo "Node.js version:" && node --version
+      - echo "npm version:" && npm --version
+      # Enable corepack shims in a writable location and activate the workspace pnpm version
+      - |
+        if ! command -v corepack >/dev/null 2>&1; then
+          echo "corepack is required to manage pnpm. Please upgrade Node.js to v16.13+ with corepack support." >&2
+          exit 1
+        fi
+        COREPACK_HOME_DIR="${COREPACK_HOME:-$HOME/.corepack}"
+        COREPACK_BIN_DIR="$COREPACK_HOME_DIR/bin"
+        mkdir -p "$COREPACK_BIN_DIR"
+        echo "Enabling corepack in $COREPACK_BIN_DIR"
+        corepack enable --install-directory "$COREPACK_BIN_DIR"
+        PNPM_SPEC=$(node -p "require('./package.json').packageManager ?? ''")
+        if [ -n "$PNPM_SPEC" ]; then
+          echo "Activating $PNPM_SPEC via corepack"
+          corepack prepare "$PNPM_SPEC" --activate
+        else
+          echo "No pnpm version pinned in package.json; activating latest pnpm via corepack"
+          corepack prepare pnpm@latest --activate
+        fi
+        echo "pnpm version:"
+        corepack pnpm --version
+        echo "If you need js tooling, add $COREPACK_BIN_DIR to your PATH:"
+        echo "export PATH=\"$COREPACK_BIN_DIR:\$PATH\""
+
+  js-install-deps:
+    desc: Install dependencies for all JS/TS packages
+    cmds:
+      - corepack pnpm -r --filter "*" install --frozen-lockfile --prefer-offline
+
+  js-build:
+    desc: Build all JavaScript/TypeScript packages using Turbo
+    deps:
+      - js-install-deps
+    cmds:
+      - corepack pnpm exec turbo run build
+
+  js-lint:
+    desc: Lint all JavaScript/TypeScript packages using Turbo
+    deps:
+      - js-install-tools
+      - js-install-deps
+    cmds:
+      - corepack pnpm exec turbo run lint
+
+  js-test:
+    desc: Test all JavaScript/TypeScript packages using Turbo
+    cmds:
+      - corepack pnpm exec turbo run test --filter='!test'
+
+  js-test:ci:
+    desc: Run JS/TS tests
+    cmds:
+      - task -d app-plane/drive js-test
+      - task -d app-plane/reporting js-test
+      # Add more domain JS test tasks here as they're created:
+      # - task -d app-plane/identity js-test
+
+  js-clean:
+    desc: Clean build artifacts for JavaScript/TypeScript packages
+    cmds:
+      - corepack pnpm exec turbo run clean
+
+  validate-resource-naming:
+    desc: Validate AWS resource and SSM parameter naming conventions across all planes
+    cmds:
+      - task: validate-resource-naming-cp
+      - task: validate-resource-naming-ap
+      - task: validate-resource-naming-op
+
+  validate-resource-naming-cp:
+    desc: Validate resource naming for control-plane (synth + check)
+    vars:
+      SAAS_ENV: '{{.saas_env | default "main"}}'
+      OUTPUT_DIR: "synth-output/"
+    cmds:
+      - task: synth-control-plane-for-naming
+        vars:
+          saas_env: "{{.SAAS_ENV}}"
+          output_dir: "{{.OUTPUT_DIR}}"
+      - npx tsx scripts/validate-resource-naming.ts control-plane/infra/{{.OUTPUT_DIR}}
+
+  validate-resource-naming-ap:
+    desc: Validate resource naming for app-plane environment and tenant launchers (synth + check)
+    vars:
+      SAAS_ENV: '{{.saas_env | default "main"}}'
+      SAAS_TENANT: '{{.saas_tenant | default "devcorp"}}'
+      OUTPUT_DIR: '{{.output | default "synth-output/"}}'
+      TENANT_OUTPUT_DIR: '{{.tenant_output | default "synth-output-tenant/"}}'
+    cmds:
+      - task: validate-resource-naming-ap-env
+        vars:
+          saas_env: "{{.SAAS_ENV}}"
+          output_dir: "{{.OUTPUT_DIR}}"
+      - task: validate-resource-naming-ap-tenant
+        vars:
+          saas_tenant: "{{.SAAS_TENANT}}"
+          output_dir: "{{.TENANT_OUTPUT_DIR}}"
+
+  validate-resource-naming-ap-env:
+    desc: Validate resource naming for app-plane environment launcher (synth + check)
+    vars:
+      SAAS_ENV: '{{.saas_env | default "main"}}'
+      OUTPUT_DIR: '{{.output_dir | default "synth-output/"}}'
+    cmds:
+      - task: synth-app-plane-for-naming
+        vars:
+          saas_env: "{{.SAAS_ENV}}"
+          output_dir: "{{.OUTPUT_DIR}}"
+      - npx tsx scripts/validate-resource-naming.ts app-plane/infra/{{.OUTPUT_DIR}}
+
+  validate-resource-naming-ap-tenant:
+    desc: Validate resource naming for app-plane tenant launcher (synth + check)
+    vars:
+      SAAS_TENANT: '{{.saas_tenant | default "devcorp"}}'
+      OUTPUT_DIR: '{{.output_dir | default "synth-output-tenant/"}}'
+    cmds:
+      - task: synth-tenant-for-naming
+        vars:
+          saas_tenant: "{{.SAAS_TENANT}}"
+          output_dir: "{{.OUTPUT_DIR}}"
+      - npx tsx scripts/validate-resource-naming.ts app-plane/infra/{{.OUTPUT_DIR}}
+
+  validate-resource-naming-op:
+    desc: Validate resource naming for observe-plane (synth + check)
+    vars:
+      SAAS_ENV: '{{.saas_env | default "main"}}'
+      OUTPUT_DIR: "synth-output/"
+      ENVIRONMENT: '{{.environment | default "main"}}'
+    cmds:
+      - task: synth-observe-plane-for-naming
+        vars:
+          saas_env: "{{.SAAS_ENV}}"
+          output_dir: "{{.OUTPUT_DIR}}"
+          ENVIRONMENT: "{{.ENVIRONMENT}}"
+      - npx tsx scripts/validate-resource-naming.ts observe-plane/service-quotas/{{.OUTPUT_DIR}}
+
+  synth-app-plane:
+    desc: Synthesize application plane CloudFormation template via CDK launcher
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      OUTPUT_DIR: "{{.output_dir | default \"\"}}"
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task synth-app-plane saas_env=<env>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk synth -a "npx tsx launcher.ts" -c env={{.SAAS_ENV}} {{.OUTPUT_FLAG}}
+
+  synth-app-plane-for-naming:
+    desc: Emit app-plane templates for resource naming validation without bundling assets
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      OUTPUT_DIR: "{{.output_dir | default \"\"}}"
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task synth-app-plane-for-naming saas_env=<env>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk list -a "npx tsx launcher.ts" -c env={{.SAAS_ENV}} {{.OUTPUT_FLAG}}
+
+  synth-observe-plane:
+    desc: Synthesize observe plane CloudFormation template
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      OUTPUT_DIR: "{{.output_dir | default \"\"}}"
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task synth-observe-plane saas_env=<env>"
+    dir: observe-plane/service-quotas
+    cmds:
+      - npx cdk synth -c environment={{.SAAS_ENV}} {{.OUTPUT_FLAG}}
+
+  synth-observe-plane-for-naming:
+    desc: Emit observe-plane templates for resource naming validation without bundling assets
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      OUTPUT_DIR: "{{.output_dir | default \"\"}}"
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task synth-observe-plane-for-naming saas_env=<env>"
+    dir: observe-plane/service-quotas
+    cmds:
+      - npx cdk list -c environment={{.SAAS_ENV}} {{.OUTPUT_FLAG}}
+
+  diff-app-plane:
+    desc: Show CDK diff for app plane via CDK launcher
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task diff-app-plane saas_env=<env>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk diff --all -a "npx tsx launcher.ts" -c env={{.SAAS_ENV}}
+
+  deploy-app-plane:
+    desc: Deploy app-plane infrastructure with CDK
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task deploy-app-plane saas_env=<env>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk deploy --all -c env={{.SAAS_ENV}} --require-approval never
+
+  publish-app-plane-region:
+    desc: Publish app-plane regional readiness to the control-plane registry
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      STATUS: '{{.status | default "ready"}}'
+      ACCEPTING_TENANTS: '{{.accepting_tenants | default ""}}'
+      AWS_REGION_OVERRIDE: '{{.aws_region | default ""}}'
+      CONTROL_PLANE_ENVIRONMENT: '{{.control_plane_environment | default ""}}'
+      CONTROL_PLANE_REGION: '{{.control_plane_region | default ""}}'
+      TABLE_NAME: '{{.table_name | default ""}}'
+      TABLE_EXPORT_NAME: '{{.table_export_name | default ""}}'
+      UPDATED_BY: '{{.updated_by | default ""}}'
+      DEPLOYMENT_REF: '{{.deployment_ref | default ""}}'
+      DRY_RUN: '{{.dry_run | default ""}}'
+      ACCEPTING_TENANTS_FLAG: '{{if .ACCEPTING_TENANTS}}--accepting-tenants "{{.ACCEPTING_TENANTS}}"{{end}}'
+      AWS_REGION_FLAG: '{{if .AWS_REGION_OVERRIDE}}--aws-region "{{.AWS_REGION_OVERRIDE}}"{{end}}'
+      CONTROL_PLANE_ENVIRONMENT_FLAG: '{{if .CONTROL_PLANE_ENVIRONMENT}}--control-plane-environment "{{.CONTROL_PLANE_ENVIRONMENT}}"{{end}}'
+      CONTROL_PLANE_REGION_FLAG: '{{if .CONTROL_PLANE_REGION}}--control-plane-region "{{.CONTROL_PLANE_REGION}}"{{end}}'
+      TABLE_NAME_FLAG: '{{if .TABLE_NAME}}--table-name "{{.TABLE_NAME}}"{{end}}'
+      TABLE_EXPORT_NAME_FLAG: '{{if .TABLE_EXPORT_NAME}}--table-export-name "{{.TABLE_EXPORT_NAME}}"{{end}}'
+      UPDATED_BY_FLAG: '{{if .UPDATED_BY}}--updated-by "{{.UPDATED_BY}}"{{end}}'
+      DEPLOYMENT_REF_FLAG: '{{if .DEPLOYMENT_REF}}--deployment-ref "{{.DEPLOYMENT_REF}}"{{end}}'
+      DRY_RUN_FLAG: '{{if eq .DRY_RUN "true"}}--dry-run{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task publish-app-plane-region saas_env=<env> aws_region=<region> [status=ready|active|inactive] [accepting_tenants=true|false]"
+      - sh: test -n "{{.AWS_REGION_OVERRIDE}}"
+        msg: "aws_region parameter is required. Usage: task publish-app-plane-region saas_env=<env> aws_region=<region> [status=ready|active|inactive] [accepting_tenants=true|false]"
+    cmds:
+      - >-
+        bash scripts/publish-app-plane-region.sh
+        --environment "{{.SAAS_ENV}}"
+        --status "{{.STATUS}}"
+        {{.ACCEPTING_TENANTS_FLAG}}
+        {{.AWS_REGION_FLAG}}
+        {{.CONTROL_PLANE_ENVIRONMENT_FLAG}}
+        {{.CONTROL_PLANE_REGION_FLAG}}
+        {{.TABLE_NAME_FLAG}}
+        {{.TABLE_EXPORT_NAME_FLAG}}
+        {{.UPDATED_BY_FLAG}}
+        {{.DEPLOYMENT_REF_FLAG}}
+        {{.DRY_RUN_FLAG}}
+
+  destroy-app-plane:
+    desc: Destroy (undeploy) app-plane infrastructure with CDK
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      FORCE_FLAG: '{{if eq .force "true"}}--force{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task destroy-app-plane saas_env=<env>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk destroy --all -c env={{.SAAS_ENV}} {{.FORCE_FLAG}}
+
+  synth-tenant:
+    desc: Synthesize tenant CloudFormation template via CDK launcher
+    vars:
+      SAAS_TENANT: "{{.saas_tenant}}"
+      OUTPUT_DIR: "{{.output_dir | default \"\"}}"
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_TENANT}}"
+        msg: "saas_tenant parameter is required. Usage: task deploy-tenant saas_tenant=<tenant-code>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk synth -a "npx tsx tenant-launcher.ts" -c tenant={{.SAAS_TENANT}} {{.OUTPUT_FLAG}} --quiet
+
+  synth-tenant-for-naming:
+    desc: Emit tenant templates for resource naming validation without bundling assets
+    vars:
+      SAAS_TENANT: "{{.saas_tenant}}"
+      OUTPUT_DIR: "{{.output_dir | default \"\"}}"
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_TENANT}}"
+        msg: "saas_tenant parameter is required. Usage: task synth-tenant-for-naming saas_tenant=<tenant-code>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk list -a "npx tsx tenant-launcher.ts" -c tenant={{.SAAS_TENANT}} {{.OUTPUT_FLAG}}
+
+  deploy-tenant:
+    desc: Deploy tenant-specific infrastructure with CDK
+    vars:
+      SAAS_TENANT: "{{.saas_tenant}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_TENANT}}"
+        msg: "saas_tenant parameter is required. Usage: task deploy-tenant saas_tenant=<tenant-code>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk deploy --all --app "npx tsx tenant-launcher.ts" -c tenant={{.SAAS_TENANT}} --require-approval never
+
+  destroy-tenant:
+    desc: Destroy tenant-specific infrastructure with CDK
+    vars:
+      SAAS_TENANT: "{{.saas_tenant}}"
+      FORCE_FLAG: '{{if eq .force "true"}}--force{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_TENANT}}"
+        msg: "saas_tenant parameter is required. Usage: task destroy-tenant saas_tenant=<tenant-code> [force=true]"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk destroy --all --app "npx tsx tenant-launcher.ts" -c tenant={{.SAAS_TENANT}} {{.FORCE_FLAG}}
+
+  diff:
+    desc: Show CDK diff for shared infrastructure (all stacks) for an environment
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task diff saas_env=<env>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk diff --all -c env={{.SAAS_ENV}}
+
+  diff-tenant:
+    desc: Show CDK diff for a single tenant stack (uses TenantLauncher directly)
+    vars:
+      SAAS_TENANT: "{{.saas_tenant}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_TENANT}}"
+        msg: "saas_tenant parameter is required. Usage: task diff-tenant saas_tenant=<tenant-code>"
+    dir: app-plane/infra
+    cmds:
+      - npx cdk diff --all --app 'npx tsx tenant-launcher.ts' -c tenant={{.SAAS_TENANT}}
+
+  test:
+    desc: Test the entire project with coverage
+    deps:
+      - go-test
+      - python-test
+      - js-test
+      - dotnet-test
+
+  # explicitly adding "!**/node_modules/**" as using ignore-path doesn't handle **/*.md
+  markdown-lint:
+    desc: Lints all markdown files
+    cmds:
+      - npx markdownlint-cli2 --config .markdownlint-cli2.jsonc "**/*.md" "!**/node_modules/**"
+
+  markdown-lint-fix:
+    desc: Lints all markdown files
+    cmds:
+      - npx markdownlint-cli2 --config .markdownlint-cli2.jsonc --fix "**/*.md" "!**/node_modules/**"
+
+  go-build:
+    desc: Builds all go modules
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        for modfile in $(find . -name "go.mod" {{.GO_EXCLUDE_PATHS}}); do
+          moddir=$(dirname "$modfile")
+          echo "Building module in $moddir"
+          cd "$moddir"
+          task build
+          cd - > /dev/null
+        done
+
+  go-test:
+    desc: Tests all go modules
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        # Add more customized domain test suites here as they're created,
+        # see docs/ci-cd/pre-main-tests.md:
+        configured_go_test_dirs="./app-plane/drive"
+
+        # just in case components are not cleaning up, clean up all coverage.out files
+        find . -type f -name 'coverage.out' -delete
+        is_configured_go_test_module() {
+          moddir="$1"
+          for configured_dir in $configured_go_test_dirs; do
+            case "$moddir" in
+              "$configured_dir"|"$configured_dir"/*)
+                return 0
+                ;;
+            esac
+          done
+          return 1
+        }
+
+        {
+          for configured_dir in $configured_go_test_dirs; do
+            printf "configured %s\n" "$configured_dir"
+          done
+          find . -name "go.mod" {{.GO_EXCLUDE_PATHS}} | while read -r modfile; do
+            moddir=$(dirname "$modfile")
+            if is_configured_go_test_module "$moddir"; then
+              echo "Skipping module in $moddir; covered by configured Go suite" >&2
+            else
+              printf "discovery %s\n" "$modfile"
+            fi
+          done
+        } | xargs -P{{.GO_NUM_PARALLEL}} -n 2 bash -c '
+          set -euo pipefail
+          entry_type="$1"
+          entry_path="$2"
+
+          rewrite_coverage_paths() {
+            configured_dir="$1"
+            coverage_file="$configured_dir/coverage.out"
+            normalized_file="$coverage_file.normalized"
+
+            if [ ! -f "$coverage_file" ]; then
+              return 0
+            fi
+
+            awk -v configured_dir="$configured_dir" '"'"'
+              NR == 1 {
+                print
+                next
+              }
+              /^\.\// {
+                sub(/^\./, configured_dir)
+              }
+              {
+                print
+              }
+            '"'"' "$coverage_file" > "$normalized_file"
+            mv "$normalized_file" "$coverage_file"
+          }
+
+          case "$entry_type" in
+            configured)
+              configured_dir="$entry_path"
+              echo "Testing configured Go suite in $configured_dir"
+              task -d "$configured_dir" go-test
+              rewrite_coverage_paths "$configured_dir"
+              ;;
+            discovery)
+              moddir=$(dirname "$entry_path")
+              echo "Testing discovered Go module in $moddir"
+              cd "$moddir"
+              task test
+              cd - > /dev/null
+              ;;
+            *)
+              echo "Unknown Go test work item type: $entry_type" >&2
+              exit 1
+              ;;
+          esac
+        ' _
+      - echo "==========================================="
+      # merges all coverage files and then replaces package with relative path
+      - gocovmerge $(find . -type f -name 'coverage.out' {{.GO_EXCLUDE_PATHS}}) > coverage-all.out
+      # replaces github.com/thermofisher/cmd-saas/ with ./ for local and removes generated code in "/gen" folders and stringer "_string.go"
+      # also removes any mock "mock" and example code in "/example" folders
+      # MAINTENANCE NOTE:
+      # If additional domain runtime directories are added (e.g. control-plane/<new-domain>/...),
+      # extend the sed expression below with corresponding mappings from fully qualified module
+      # import path to the relative local path so coverage reports collapse correctly.
+      # Pattern example to add:
+      #   -e 's|github.com/thermofisher/cmd-saas/control-plane/<new-domain>/<lambda>|./control-plane/<new-domain>/<lambda>|g'
+      - |
+        sed \
+          -e 's|github.com/thermofisher/cmd-saas/control-plane/tenant-management/tenant-lambda|./control-plane/tenant-management/tenant-lambda|g' \
+          -e 's|github.com/thermofisher/cmd-saas/control-plane/tenant-management/tenant-streams-lambda|./control-plane/tenant-management/tenant-streams-lambda|g' \
+          -e 's|github.com/thermofisher/cmd-saas/app-plane/drive/blob-validation-consumer-lambda|./app-plane/drive/blob-gateway/validation-consumer|g' \
+          -e 's|github.com/thermofisher/cmd-saas/app-plane/identity/presignup-lambda|./app-plane/identity/presignup-lambda|g' \
+          -e 's|MFDS3ObjectTagInterpreterLambda|./app-plane/drive/mfd-tag-interpreter-lambda|g' \
+          -e 's|github.com/thermofisher/cmd-saas/app-plane/drive/recycle-bin-cleanup-lambda|./app-plane/drive/blob-gateway/recycle-bin-cleanup-lambda|g' \
+          -e 's|github.com/thermofisher/cmd-saas/libs/|./libs/go/|g' \
+          -e 's|github.com/thermofisher/cmd-saas/|./|g' \
+          coverage-all.out | grep -Ev '_string.go|/gen/|mock|/example/' > coverage-local.out
+      - go tool cover -func=coverage-local.out
+
+  go-test:ci:
+    desc: Run go tests
+    cmds:
+      - task: go-test
+
+  go-mod-tidy:
+    desc: tidy all go modules
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        for modfile in $(find . -name "go.mod" {{.GO_EXCLUDE_PATHS}}); do
+          moddir=$(dirname "$modfile")
+          echo "Running go mod tidy in $moddir"
+          cd "$moddir" && go mod tidy
+          cd - > /dev/null
+        done
+
+  go-mod-download:
+    desc: downloads all go modules
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        for modfile in $(find . -name "go.mod" {{.GO_EXCLUDE_PATHS}}); do
+          moddir=$(dirname "$modfile")
+          echo "Running go mod download in $moddir"
+          cd "$moddir" && go mod download
+          cd - > /dev/null
+        done
+
+  go-lint:
+    desc: Lints all go modules
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        find . -name "go.mod" {{.GO_EXCLUDE_PATHS}} | xargs -P{{.GO_NUM_PARALLEL}} -I {} bash -c '
+          set -euo pipefail
+          moddir=$(dirname "$1")
+          echo "Linting module in $moddir"
+          cd "$moddir" && golangci-lint run --config="$REPO_ROOT/.golangci.yaml"
+          cd - > /dev/null
+        ' _ {}
+
+  go-lint-app-plane-identity:
+    desc: Lints go modules under app-plane/identity
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        find ./app-plane/identity -name "go.mod" {{.GO_EXCLUDE_APP_PLANE_PATHS}} | xargs -P{{.GO_NUM_PARALLEL}} -I {} bash -c '
+          set -euo pipefail
+          moddir=$(dirname "$1")
+          echo "Linting module in $moddir"
+          cd "$moddir" && golangci-lint run --config="$REPO_ROOT/.golangci.yaml"
+          cd - > /dev/null
+        ' _ {}
+
+  go-lint-app-plane-other:
+    desc: Lints go modules under app-plane except identity
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        find ./app-plane -name "go.mod" -not -path "./app-plane/identity/*" {{.GO_EXCLUDE_APP_PLANE_PATHS}} | xargs -P{{.GO_NUM_PARALLEL}} -I {} bash -c '
+          set -euo pipefail
+          moddir=$(dirname "$1")
+          echo "Linting module in $moddir"
+          cd "$moddir" && golangci-lint run --config="$REPO_ROOT/.golangci.yaml"
+          cd - > /dev/null
+        ' _ {}
+
+  go-lint-other:
+    desc: Lints go modules not under app-plane
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        find . -name "go.mod" {{.GO_EXCLUDE_OTHER_PATHS}} | xargs -P{{.GO_NUM_PARALLEL}} -I {} bash -c '
+          set -euo pipefail
+          moddir=$(dirname "$1")
+          echo "Linting module in $moddir"
+          cd "$moddir" && golangci-lint run --config="$REPO_ROOT/.golangci.yaml"
+          cd - > /dev/null
+        ' _ {}
+
+  go-fmt:
+    desc: Formats all go modules
+    env:
+      REPO_ROOT: "{{.TASKFILE_DIR}}"
+    cmds:
+      - |
+        set -euo pipefail
+        for modfile in $(find . -name "go.mod" {{.GO_EXCLUDE_PATHS}}); do
+          moddir=$(dirname "$modfile")
+          echo "Formatting module in $moddir"
+          cd "$moddir" && golangci-lint fmt --config="$REPO_ROOT/.golangci.yaml" && golangci-lint run --fix --config="$REPO_ROOT/.golangci.yaml"
+          cd - > /dev/null
+        done
+
+  python-build:
+    desc: Builds all Python projects
+    cmds:
+      - |
+        set -euo pipefail
+        for pyproj in $(find . -name "pyproject.toml" {{.PY_EXCLUDE_PATHS}}); do
+          projdir=$(dirname "$pyproj")
+          echo "Building project in $projdir"
+          cd "$projdir"
+          task build
+          cd - > /dev/null
+        done
+
+  python-test:
+    desc: Tests all Python projects
+    cmds:
+      - |
+        set -euo pipefail
+        for pyproj in $(find . -name "pyproject.toml" {{.PY_EXCLUDE_PATHS}}); do
+          projdir=$(dirname "$pyproj")
+          echo "Testing project in $projdir"
+          cd "$projdir"
+          task test
+          cd - > /dev/null
+        done
+
+  python-lint:
+    desc: Lints all Python projects
+    cmds:
+      - |
+        set -euo pipefail
+        for pyproj in $(find . -name "pyproject.toml" {{.PY_EXCLUDE_PATHS}}); do
+          projdir=$(dirname "$pyproj")
+          echo "Linting project in $projdir"
+          cd "$projdir" && task lint
+          cd - > /dev/null
+        done
+
+  python-fmt:
+    desc: Formats all Python projects
+    cmds:
+      - |
+        set -euo pipefail
+        for pyproj in $(find . -name "pyproject.toml" {{.PY_EXCLUDE_PATHS}}); do
+          projdir=$(dirname "$pyproj")
+          echo "Formatting project in $projdir"
+          cd "$projdir" && task fmt
+          cd - > /dev/null
+        done
+
+  dotnet-build:
+    desc: Builds all .NET solutions
+    preconditions:
+      - sh: command -v dotnet >/dev/null 2>&1
+        msg: |
+          .NET SDK is not installed. Please install .NET 10 SDK first:
+            https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+    cmds:
+      - |
+        set -euo pipefail
+        for solution in $(find . \( -name "*.slnx" -o -name "*.sln" \) {{.DOTNET_EXCLUDE_PATHS}}); do
+          solutiondir=$(dirname "$solution")
+          solutionfile=$(basename "$solution")
+          echo "Building solution in $solutiondir"
+          cd "$solutiondir" && dotnet build "$solutionfile"
+          cd - > /dev/null
+        done
+
+  dotnet-test:
+    desc: Tests all .NET solutions
+    preconditions:
+      - sh: command -v dotnet >/dev/null 2>&1
+        msg: |
+          .NET SDK is not installed. Please install .NET 10 SDK first:
+            https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+    cmds:
+      - |
+        set -euo pipefail
+        for solution in $(find . \( -name "*.slnx" -o -name "*.sln" \) {{.DOTNET_EXCLUDE_PATHS}}); do
+          solutiondir=$(dirname "$solution")
+          solutionfile=$(basename "$solution")
+          echo "Testing solution in $solutiondir"
+          cd "$solutiondir" && dotnet test "$solutionfile"
+          cd - > /dev/null
+        done
+
+  dotnet-lint:
+    desc: Verifies formatting for all .NET solutions
+    preconditions:
+      - sh: command -v dotnet >/dev/null 2>&1
+        msg: |
+          .NET SDK is not installed. Please install .NET 10 SDK first:
+            https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+    cmds:
+      - |
+        set -euo pipefail
+        for solution in $(find . \( -name "*.slnx" -o -name "*.sln" \) {{.DOTNET_EXCLUDE_PATHS}}); do
+          solutiondir=$(dirname "$solution")
+          solutionfile=$(basename "$solution")
+          echo "Linting solution in $solutiondir"
+          cd "$solutiondir" && dotnet format "$solutionfile" --verify-no-changes
+          cd - > /dev/null
+        done
+
+  dotnet-fmt:
+    desc: Formats all .NET solutions
+    preconditions:
+      - sh: command -v dotnet >/dev/null 2>&1
+        msg: |
+          .NET SDK is not installed. Please install .NET 10 SDK first:
+            https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+    cmds:
+      - |
+        set -euo pipefail
+        for solution in $(find . \( -name "*.slnx" -o -name "*.sln" \) {{.DOTNET_EXCLUDE_PATHS}}); do
+          solutiondir=$(dirname "$solution")
+          solutionfile=$(basename "$solution")
+          echo "Formatting solution in $solutiondir"
+          cd "$solutiondir" && dotnet format "$solutionfile"
+          cd - > /dev/null
+        done
+
+  dotnet-clean:
+    desc: Cleans all .NET solutions with dotnet clean
+    preconditions:
+      - sh: command -v dotnet >/dev/null 2>&1
+        msg: |
+          .NET SDK is not installed. Please install .NET 10 SDK first:
+            https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+    cmds:
+      - |
+        set -euo pipefail
+        for solution in $(find . \( -name "*.slnx" -o -name "*.sln" \) {{.DOTNET_EXCLUDE_PATHS}}); do
+          solutiondir=$(dirname "$solution")
+          solutionfile=$(basename "$solution")
+          echo "Cleaning solution in $solutiondir"
+          cd "$solutiondir" && dotnet clean "$solutionfile"
+          cd - > /dev/null
+        done
+
+  dotnet-deep-clean:
+    desc: Removes .NET build and test artifacts under .NET solution roots
+    preconditions:
+      - sh: command -v dotnet >/dev/null 2>&1
+        msg: |
+          .NET SDK is not installed. Please install .NET 10 SDK first:
+            https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+    cmds:
+      - |
+        set -euo pipefail
+        for solution in $(find . \( -name "*.slnx" -o -name "*.sln" \) {{.DOTNET_EXCLUDE_PATHS}}); do
+          solutiondir=$(dirname "$solution")
+          echo "Deep cleaning solution artifacts in $solutiondir"
+          find "$solutiondir" \
+            \( -type d \( -name bin -o -name obj -o -name TestResults \) \) \
+            -prune -exec rm -rf -- {} \;
+        done
+
+  new-go-service:
+    desc: "Create a new go service from template"
+    interactive: true
+    cmds:
+      - bash scripts/new-go-service.sh
+
+  new-go-library:
+    aliases: [new-go-lib]
+    desc: "Create a new go library from template"
+    interactive: true
+    cmds:
+      - bash scripts/new-go-library.sh
+
+  new-go-lambda:
+    desc: "Create a new go lambda from template"
+    interactive: true
+    cmds:
+      - bash scripts/new-go-lambda.sh
+
+  new-csharp-lambda:
+    desc: "Create a new C# lambda from template"
+    interactive: true
+    cmds:
+      - bash scripts/new-csharp-lambda.sh
+
+  new-cdk-infra:
+    desc: "Create a new CDK domain infrastructure workspace"
+    interactive: true
+    cmds:
+      - bash scripts/new-cdk-infra.sh
+
+  new-python-lambda:
+    desc: "Create a new python lambda from template"
+    interactive: true
+    cmds:
+      - bash scripts/new-python-lambda.sh
+
+  new-cdk-tenant:
+    desc: "Create a new app-plane tenant configuration"
+    vars:
+      TENANT_CODE: "{{.tenant_code}}"
+      URL_PREFIX: '{{.url_prefix | default "cmddev"}}'
+      HOSTED_ZONE_ID: '{{.hosted_zone_id | default "ZGV00PO5Z7OWH"}}'
+      SAAS_ENV: "{{.saas_env}}"
+      SAAS_TENANT_REGION: "{{.saas_tenant_region}}"
+    preconditions:
+      - sh: test -n "{{.TENANT_CODE}}"
+        msg: "tenant_code parameter is required. Usage: task new-cdk-tenant tenant_code=<tenant-code> [url_prefix=...] [hosted_zone_id=...] [saas_env=...] [saas_tenant_region=...]"
+    cmds:
+      - bash scripts/new-cdk-tenant.sh "{{.TENANT_CODE}}" "{{.URL_PREFIX}}" "{{.HOSTED_ZONE_ID}}" "{{.SAAS_ENV}}" "{{.SAAS_TENANT_REGION}}"
+    silent: false
+
+  # TODO: figure out how to build container with private go modules
+  sam-build-container:
+    desc: Run the SAM build with --use-container (mimics deploy)
+    cmds:
+      - echo "If using colima first export DOCKER_HOST=\"unix://$HOME/.colima/docker.sock\""
+      - sam build --use-container
+
+  sam-dev-container:
+    desc: Run the SAM local environment in containers (mimics deploy)
+    cmds:
+      - task: sam-build-container
+      - sam local start-api --host localhost
+
+  sam-build:
+    desc: Run the SAM build without --use-container (faster local dev)
+    cmds:
+      - echo "If using colima first export DOCKER_HOST=\"unix://$HOME/.colima/docker.sock\""
+      - sam build
+
+  sam-dev:
+    desc: Run the SAM local environment without containers (faster local dev)
+    cmds:
+      - task: sam-build
+      - sam local start-api --host localhost
+
+  new-cdk-cp:
+    desc: Create new control plane environment configuration
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      URL_PREFIX: '{{.url_prefix | default "cmddev"}}'
+      HOSTED_ZONE_ID: '{{.hosted_zone_id | default "ZGV00PO5Z7OWH"}}'
+      CREATE_AMPLIFY_APPS: "{{.create_amplify_apps}}"
+      AMPLIFY_BRANCH: "{{.amplify_branch}}"
+      PROD_DNS_LAYOUT: "{{.prod_dns_layout}}"
+      ENABLE_AUTO_SUB_DOMAIN: "{{.enable_auto_sub_domain}}"
+      TOP_LEVEL_DOMAIN: "{{.top_level_domain}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task new-cdk-cp saas_env=<env> [url_prefix=...] [hosted_zone_id=...] [create_amplify_apps=...] [amplify_branch=...] [prod_dns_layout=...] [enable_auto_sub_domain=...]"
+    cmds:
+      - |
+        set -euo pipefail
+        ENV_FILE="control-plane/infra/config/{{.SAAS_ENV}}.json"
+        if [ -f "$ENV_FILE" ]; then
+          echo "Control-plane config $ENV_FILE already exists. Aborting to avoid overwrite."
+          exit 1
+        fi
+        ./scripts/new-cdk-controlplane-conf.sh "{{.SAAS_ENV}}" "{{.URL_PREFIX}}" "{{.HOSTED_ZONE_ID}}" "{{.CREATE_AMPLIFY_APPS}}" "{{.AMPLIFY_BRANCH}}" "{{.PROD_DNS_LAYOUT}}" "{{.ENABLE_AUTO_SUB_DOMAIN}}" "{{.TOP_LEVEL_DOMAIN}}"
+
+  new-cdk-env:
+    desc: Create new application plane environment configuration
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      ACCOUNT: '{{.account | default "078680276960"}}'
+      REGION: '{{.region | default "us-east-2"}}'
+      PREFIX: '{{.prefix | default "cmd-saas"}}'
+      DOMAIN_PREFIX: '{{.domain_prefix | default "cmddev"}}'
+      HOSTED_ZONE_ID: '{{.hosted_zone_id | default "ZGV00PO5Z7OWH"}}'
+      DEFAULT_TENANT_CODE: '{{.default_tenant_code | default "devcorp"}}'
+      TOP_LEVEL_DOMAIN: '{{.top_level_domain | default "saas.cmddev.thermofisher.com"}}'
+      CREATE_AMPLIFY_APPS: "{{.create_amplify_apps}}"
+      AMPLIFY_BRANCH: "{{.amplify_branch}}"
+      TENANT_MALWARE_PROTECTION_OPTOUT: '{{.tenant_malware_protection_optout}}'
+      PROD_DNS_LAYOUT: "{{.prod_dns_layout}}"
+      ENABLE_AUTO_SUB_DOMAIN: "{{.enable_auto_sub_domain}}"
+      ENABLE_FEATURES: "{{.enable_features}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task new-cdk-env saas_env=<env> [account=...] [region=...] [prefix=...] [domain_prefix=...] [hosted_zone_id=...] [default_tenant=...] [top-level-domain=...] [create_amplify_apps=...] [amplify_branch=...] [tenant_malware_protection_optout=...] [prod_dns_layout=...] [enable_auto_sub_domain=...] [enable_features=...]"
+    cmds:
+      - ./scripts/new-cdk-env.sh "{{.SAAS_ENV}}" "{{.ACCOUNT}}" "{{.REGION}}" "{{.PREFIX}}" "{{.DOMAIN_PREFIX}}" "{{.HOSTED_ZONE_ID}}" "{{.DEFAULT_TENANT_CODE}}" "{{.TOP_LEVEL_DOMAIN}}" "{{.CREATE_AMPLIFY_APPS}}" "{{.AMPLIFY_BRANCH}}" "{{.TENANT_MALWARE_PROTECTION_OPTOUT}}" "{{.PROD_DNS_LAYOUT}}" "{{.ENABLE_AUTO_SUB_DOMAIN}}" "{{.ENABLE_FEATURES}}"
+    silent: false
+
+  diff-control-plane:
+    desc: Show CDK diff for control plane via CDK launcher
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task diff-control-plane saas_env=<env>"
+    dir: control-plane/infra
+    cmds:
+      - npx cdk diff -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}}
+
+  deploy-control-plane:
+    desc: Deploy control plane infrastructure via CDK launcher
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task deploy-control-plane saas_env=<env>"
+    dir: control-plane/infra
+    cmds:
+      - npx cdk deploy --all -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} --require-approval never
+
+  destroy-control-plane:
+    desc: Destroy control plane infrastructure via CDK launcher
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      FORCE_FLAG: '{{if eq .force "true"}}--force{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task destroy-control-plane saas_env=<env> [force=true]"
+    dir: control-plane/infra
+    cmds:
+      - npx cdk destroy --all -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.FORCE_FLAG}}
+
+  synth-control-plane:
+    desc: Synthesize control plane CloudFormation template via CDK launcher
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      OUTPUT_DIR: '{{.output_dir | default ""}}'
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task synth-control-plane saas_env=<env>"
+    dir: control-plane/infra
+    cmds:
+      - npx cdk synth -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.OUTPUT_FLAG}}
+
+  synth-control-plane-for-naming:
+    desc: Emit control-plane templates for resource naming validation without bundling assets
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      OUTPUT_DIR: '{{.output_dir | default ""}}'
+      OUTPUT_FLAG: '{{if .OUTPUT_DIR}}--output {{.OUTPUT_DIR}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task synth-control-plane-for-naming saas_env=<env>"
+    dir: control-plane/infra
+    cmds:
+      - npx cdk list -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.OUTPUT_FLAG}}
+
+  synth-metrics-dashboard:
+    desc: Synthesize metrics dashboard
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task synth-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>]"
+    cmds:
+      - task -d observe-plane/infra synth-metrics-dashboard saas_env={{.SAAS_ENV}} tenant_code={{.TENANT_CODE}}
+
+  validate-metrics-dashboard:
+    desc: Validate metrics dashboard
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task validate-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>]"
+    cmds:
+      - task -d observe-plane/infra validate-metrics-dashboard saas_env={{.SAAS_ENV}} tenant_code={{.TENANT_CODE}}
+
+  deploy-metrics-dashboard:
+    desc: Deploy metrics dashboard
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task deploy-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>]"
+    cmds:
+      - task -d observe-plane/infra deploy-metrics-dashboard saas_env={{.SAAS_ENV}} tenant_code={{.TENANT_CODE}}
+
+  destroy-metrics-dashboard:
+    desc: Destroy metrics dashboard
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+      FORCE_FLAG: '{{if eq .force "true"}}--force{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task destroy-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>] [force=true]"
+    cmds:
+      - task -d observe-plane/infra destroy-metrics-dashboard saas_env={{.SAAS_ENV}} tenant_code={{.TENANT_CODE}} force={{.force}}
+
+  discover-alarm-resources:
+    desc: Discover tagged AWS resources and write the alarm resource inventory
+    vars:
+      CONFIG: "{{.config}}"
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required. Usage: task discover-alarm-resources config=<path/to/config.json>"
+    cmds:
+      - task -d observe-plane/alarms discover config={{.CONFIG}}
+
+  deploy-alarms:
+    desc: Deploy all observe-plane alarm stacks
+    vars:
+      CONFIG: "{{.config}}"
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required. Usage: task deploy-alarms config=<path/to/config.json>"
+    cmds:
+      - task -d observe-plane/alarms deploy-alarms config={{.CONFIG}}
+
+  destroy-alarms:
+    desc: Destroy all observe-plane alarm stacks
+    vars:
+      CONFIG: "{{.config}}"
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required. Usage: task destroy-alarms config=<path/to/config.json> [force=true]"
+    cmds:
+      - task -d observe-plane/alarms destroy-alarms config={{.CONFIG}} force={{.force}}
+
+  destroy-tenant-alarms:
+    desc: Destroy a specific tenant alarm stack
+    vars:
+      CONFIG: "{{.config}}"
+      TENANT: "{{.tenant}}"
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required."
+      - sh: test -n "{{.TENANT}}"
+        msg: "tenant is required. Usage: task destroy-tenant-alarms config=<config.json> tenant=<tenant-code>"
+    cmds:
+      - task -d observe-plane/alarms destroy-tenant-alarms config={{.CONFIG}} tenant={{.TENANT}} force={{.force}}
+
+  deploy-service-quotas:
+    desc: Deploy service quotas monitoring to both us-east-1 and us-east-2
+    vars:
+      ENVIRONMENT: '{{.environment}}'
+      NOTIFICATION_EMAILS: '{{.notification_emails | default "cmd-aws-alerts@thermofisher.onmicrosoft.com"}}'
+      STACKS: '{{.stacks | default "--all"}}'
+    preconditions:
+      - sh: test -n "{{.ENVIRONMENT}}"
+        msg: "environment is required. Usage: task deploy-service-quotas environment=<env>"
+    dir: observe-plane/service-quotas
+    cmds:
+      - corepack pnpm install --frozen-lockfile --ignore-workspace
+      - corepack pnpm run build
+      - corepack pnpm cdk deploy {{.STACKS}} --require-approval never
+    env:
+      ENVIRONMENT: '{{.ENVIRONMENT}}'
+      NOTIFICATION_EMAILS: '{{.NOTIFICATION_EMAILS}}'
