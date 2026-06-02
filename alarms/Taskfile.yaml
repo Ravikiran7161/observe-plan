@@ -1,0 +1,113 @@
+version: "3"
+
+tasks:
+  # ---------------------------------------------------------------------------
+  # Go — resource discovery
+  # ---------------------------------------------------------------------------
+
+  discover:
+    desc: Discover tagged AWS resources, group by scope, write to generated/multi/
+    vars:
+      CONFIG: "{{.config}}"
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required. Usage: task -d observe-plane/alarms discover config=<path/to/config.json>"
+      - sh: test -f {{.CONFIG}}
+        msg: "Config file {{.CONFIG}} not found."
+    cmds:
+      - go run ./discover --config {{.CONFIG}}
+
+  go-mod:
+    desc: Tidy and verify module
+    cmds:
+      - go mod tidy
+      - go mod verify
+
+  build:
+    desc: Build the discover binary
+    cmds:
+      - mkdir -p bin
+      - go build -o bin/discover ./discover
+
+  lint:
+    desc: Lint the alarms Go code
+    cmds:
+      - golangci-lint run --config=../../.golangci.yaml
+
+  test:
+    desc: Run alarms Go tests
+    cmds:
+      - go clean -testcache
+      - gotestsum --format=standard-verbose ./... && go test -coverprofile=coverage.out -covermode=atomic ./...
+
+  # ---------------------------------------------------------------------------
+  # CDK — alarms infrastructure
+  # ---------------------------------------------------------------------------
+
+  js-build:
+    desc: Install dependencies and build alarms CDK infrastructure
+    cmds:
+      - echo "Running pnpm install for observe-plane-alarms-infra"
+      - corepack pnpm install --filter "observe-plane-alarms-infra..." --no-frozen-lockfile --prefer-offline
+      - echo "Building shared infrastructure libraries"
+      - corepack pnpm --filter "@cmd-saas/libs-infra-resource" run build
+      - echo "Building observe-plane/alarms/infra"
+      - corepack pnpm --filter "observe-plane-alarms-infra" run build
+
+  js-lint:
+    desc: Lint alarms CDK infrastructure code
+    cmds:
+      - corepack pnpm --filter "observe-plane-alarms-infra" run lint
+
+  synth-alarms:
+    desc: Synthesize alarms CloudFormation templates
+    vars:
+      CONFIG: "{{.config}}"
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required. Usage: task -d observe-plane/alarms synth-alarms config=<path/to/config.json>"
+    cmds:
+      - task: js-build
+      - task: js-lint
+      - npx cdk synth -a "npx tsx infra/launcher.ts" -c config={{.CONFIG}}
+
+  deploy-alarms:
+    desc: Deploy all alarm stacks (discover → build → deploy)
+    vars:
+      CONFIG: "{{.config}}"
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required. Usage: task -d observe-plane/alarms deploy-alarms config=<path/to/config.json>"
+    cmds:
+      - task: discover
+        vars: { config: "{{.CONFIG}}" }
+      - task: js-build
+      - task: js-lint
+      - npx cdk deploy --all -a "npx tsx infra/launcher.ts" -c config={{.CONFIG}} --require-approval never
+
+  destroy-alarms:
+    desc: Destroy all alarm stacks for an environment
+    vars:
+      CONFIG: "{{.config}}"
+      FORCE_FLAG: '{{if eq .force "true"}}--force{{end}}'
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required. Usage: task -d observe-plane/alarms destroy-alarms config=<path/to/config.json> [force=true]"
+    cmds:
+      - task: js-build
+      - npx cdk destroy --all -a "npx tsx infra/launcher.ts" -c config={{.CONFIG}} -c destroy=true {{.FORCE_FLAG}}
+
+  destroy-tenant-alarms:
+    desc: Destroy a specific tenant alarm stack
+    vars:
+      CONFIG: "{{.config}}"
+      TENANT: "{{.tenant}}"
+      FORCE_FLAG: '{{if eq .force "true"}}--force{{end}}'
+    preconditions:
+      - sh: test -n "{{.CONFIG}}"
+        msg: "config is required."
+      - sh: test -n "{{.TENANT}}"
+        msg: "tenant is required. Usage: task -d observe-plane/alarms destroy-tenant-alarms config=<config.json> tenant=<tenant-code>"
+    cmds:
+      - task: js-build
+      - npx cdk destroy "op-*-alarms-tenant-{{.TENANT}}" -a "npx tsx infra/launcher.ts" -c config={{.CONFIG}} -c destroy=true {{.FORCE_FLAG}}

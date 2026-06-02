@@ -1,0 +1,30 @@
+{
+  "name": "observe-plane-infra",
+  "version": "1.0.0",
+  "description": "AWS CDK infrastructure for CMD SaaS Observe Plane",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint . --ext .ts",
+    "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint . --ext .ts --fix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.6.3",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
+    "aws-cdk": "^2.257.0",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "@aws-cdk/aws-lambda-go-alpha": "2.257.0-alpha.0",
+    "@cmd-saas/libs-infra-constructs": "workspace:*",
+    "@cmd-saas/libs-infra-resource": "workspace:*",
+    "aws-cdk-lib": "^2.257.0",
+    "constructs": "^10.6.0"
+  }
+}

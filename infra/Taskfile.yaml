@@ -1,0 +1,108 @@
+version: "3"
+
+tasks:
+  js-lint:
+    desc: Lint observe-plane infrastructure code
+    cmds:
+      - echo "Linting observe-plane/infra"
+      - corepack pnpm --filter "observe-plane-infra" run lint
+
+  js-build:
+    desc: Install dependencies and build observe-plane infrastructure
+    cmds:
+      - echo "Running pnpm install for observe-plane-infra"
+      - corepack pnpm install --filter "observe-plane-infra..." --no-frozen-lockfile --prefer-offline
+      - echo "Building shared infrastructure libraries"
+      - corepack pnpm --filter "@cmd-saas/libs-infra-resource" run build
+      - corepack pnpm --filter "@cmd-saas/libs-infra-param-store" run build
+      - corepack pnpm --filter "@cmd-saas/libs-infra-constructs" run build
+      - echo "Building observe-plane/infra"
+      - corepack pnpm --filter "observe-plane-infra" run build
+
+  validate-metrics-dashboard:
+    desc: Validate metrics dashboard
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+      TENANT_CODE_FLAG: '{{if .TENANT_CODE}}-c tenant_code={{.TENANT_CODE}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task -d observe-plane/infra validate-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>]"
+    cmds:
+      - task js-build
+      - task js-lint
+      - task -d ../metrics/dashboard lint
+      - task -d ../metrics/dashboard build
+      - task -d ../metrics/dashboard test
+      - npx cdk synth -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.TENANT_CODE_FLAG}}
+
+  synth-metrics-dashboard:
+    desc: Synthesize metrics dashboard
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+      TENANT_CODE_FLAG: '{{if .TENANT_CODE}}-c tenant_code={{.TENANT_CODE}}{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task -d observe-plane/infra synth-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>]"
+    cmds:
+      - task js-build
+      - task js-lint
+      - npx cdk synth -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.TENANT_CODE_FLAG}}
+
+  deploy-metrics-dashboard:
+    desc: Deploy metrics dashboard
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+      TENANT_CODE_FLAG: '{{if .TENANT_CODE}}-c tenant_code={{.TENANT_CODE}}{{end}}'
+    deps:
+      - task: validate-metrics-dashboard
+        vars:
+          saas_env: "{{.saas_env}}"
+          tenant_code: "{{.tenant_code}}"
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task -d observe-plane/infra deploy-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>]"
+    cmds:
+      - npx cdk deploy --all -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.TENANT_CODE_FLAG}} --require-approval never
+
+  destroy-metrics-dashboard:
+    desc: Destroy metrics dashboard
+    deps:
+      - js-build
+    vars:
+      SAAS_ENV: "{{.saas_env}}"
+      TENANT_CODE: "{{.tenant_code}}"
+      TENANT_CODE_FLAG: '{{if .TENANT_CODE}}-c tenant_code={{.TENANT_CODE}}{{end}}'
+      FORCE_FLAG: '{{if eq .force "true"}}--force{{end}}'
+    preconditions:
+      - sh: test -n "{{.SAAS_ENV}}"
+        msg: "saas_env parameter is required. Usage: task -d observe-plane/infra destroy-metrics-dashboard saas_env=<env> [tenant_code=<tenant-code>] [force=true]"
+    cmds:
+      # - npx cdk destroy --all -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.TENANT_CODE_FLAG}} {{.FORCE_FLAG}}
+      # With cleanup for occasional orphaned custom-resource log groups.
+      - |
+        set -euo pipefail
+
+        STACK=$(npx cdk ls -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.TENANT_CODE_FLAG}} | head -n1)
+
+        npx cdk destroy "$STACK" -a "npx tsx launcher.ts" -c environment={{.SAAS_ENV}} {{.TENANT_CODE_FLAG}} {{.FORCE_FLAG}}
+
+        for prefix in \
+          "${STACK}-DashboardLambdaResourcesDashboardCustomResourceLogGroup" \
+          "${STACK}-DashboardLambdaResourcesDashboardCustomResourceHandlerLogGroup" \
+          "${STACK}-DashboardLambdaResourcesDashboardCustomResourceProviderLogGroup"
+        do
+          log_groups=$(aws logs describe-log-groups \
+            --log-group-name-prefix "$prefix" \
+            --query 'logGroups[].logGroupName' \
+            --output text 2>/dev/null || true)
+
+          for log_group in $log_groups; do
+            if [ -n "$log_group" ] && [ "$log_group" != "None" ]; then
+              echo "Deleting orphaned log group: $log_group"
+              aws logs delete-log-group --log-group-name "$log_group"
+            fi
+          done
+        done

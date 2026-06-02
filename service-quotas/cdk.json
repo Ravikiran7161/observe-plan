@@ -1,0 +1,25 @@
+{
+  "app": "npx tsx src/app.ts",
+  "watch": {
+    "include": [
+      "**"
+    ],
+    "exclude": [
+      "README.md",
+      "cdk*.json",
+      "**/*.d.ts",
+      "**/*.js",
+      "tsconfig.json",
+      "package*.json",
+      "node_modules",
+      "dist"
+    ]
+  },
+  "context": {
+    "@aws-cdk/customresources:installLatestAwsSdkDefault": false,
+    "acknowledged-issue-numbers": [
+      34892,
+      37013
+    ]
+  }
+}

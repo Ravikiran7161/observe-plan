@@ -1,0 +1,28 @@
+{
+  "name": "observe-plane-alarms-infra",
+  "version": "1.0.0",
+  "description": "AWS CDK infrastructure for CMD SaaS Observe Plane Alarms",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.6.3",
+    "@typescript-eslint/eslint-plugin": "^6.7.0",
+    "@typescript-eslint/parser": "^6.7.0",
+    "aws-cdk": "^2.237.1",
+    "eslint": "^8.49.0",
+    "eslint-config-prettier": "^9.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "@cmd-saas/libs-infra-resource": "workspace:*",
+    "aws-cdk-lib": "2.237.1",
+    "constructs": "10.4.5"
+  }
+}

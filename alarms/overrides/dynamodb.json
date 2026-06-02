@@ -1,0 +1,39 @@
+{
+  "defaults": {
+    "systemErrors": {
+      "threshold": 1,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "throttledRequests": {
+      "threshold": 10,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "latencyP99": {
+      "threshold": 100,
+      "evaluationPeriods": 2,
+      "datapointsToAlarm": 2,
+      "periodMinutes": 5
+    }
+  },
+  "tables": {
+    "cp-use2-main-tenant-mgmt-tenants": {
+      "throttledRequests": {
+        "threshold": 25
+      },
+      "latencyP99": {
+        "threshold": 50
+      }
+    },
+    "cp-use2-main-tenant-mgmt-provisioning": {
+      "systemErrors": {
+        "threshold": 0,
+        "evaluationPeriods": 1,
+        "datapointsToAlarm": 1
+      }
+    }
+  }
+}

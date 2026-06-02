@@ -1,0 +1,32 @@
+{
+  "defaults": {
+    "4xx": {
+      "threshold": 155,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "5xx": {
+      "threshold": 30,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "latencyP95": {
+      "threshold": 3000,
+      "evaluationPeriods": 2,
+      "datapointsToAlarm": 2,
+      "periodMinutes": 5
+    }
+  },
+  "apis": {
+    "ap-use2-main-identity-api:dev": {
+      "4xx": {
+        "threshold": 250
+      },
+      "5xx": {
+        "threshold": 50
+      }
+    }
+  }
+}

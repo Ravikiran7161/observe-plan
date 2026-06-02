@@ -1,0 +1,26 @@
+{
+  "name": "@cmd-saas/service-quotas",
+  "version": "1.0.0",
+  "description": "AWS Service Quotas notifications",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy --all --require-approval never",
+    "destroy": "cdk destroy --all --force"
+  },
+  "dependencies": {
+    "@cmd-saas/libs-infra-resource": "link:../../libs/infra/resource",
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.4.2",
+    "source-map-support": "^0.5.21"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/source-map-support": "^0.5.10",
+    "aws-cdk": "^2.170.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.7.2"
+  }
+}

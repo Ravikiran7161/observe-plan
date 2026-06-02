@@ -1,0 +1,27 @@
+{
+  "defaults": {
+    "throttleCount": {
+      "threshold": 10,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "signInThrottles": {
+      "threshold": 5,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    }
+  },
+  "pools": {
+    "us-east-2_AbCdEfGhI": {
+      "throttleCount": {
+        "threshold": 20,
+        "evaluationPeriods": 2
+      },
+      "signInThrottles": {
+        "threshold": 10
+      }
+    }
+  }
+}

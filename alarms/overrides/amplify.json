@@ -1,0 +1,49 @@
+{
+  "defaults": {
+    "4xx": {
+      "threshold": 100,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "5xx": {
+      "threshold": 20,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "latencyP95": {
+      "threshold": 2,
+      "evaluationPeriods": 2,
+      "datapointsToAlarm": 2,
+      "periodMinutes": 5
+    },
+    "requests": {
+      "threshold": 10000,
+      "evaluationPeriods": 1,
+      "datapointsToAlarm": 1,
+      "periodMinutes": 5
+    },
+    "tokensConsumed": {
+      "threshold": 1000,
+      "evaluationPeriods": 2,
+      "datapointsToAlarm": 2,
+      "periodMinutes": 5
+    }
+  },
+  "apps": {
+    "ap-use2-main-landing": {
+      "5xx": {
+        "threshold": 5
+      },
+      "latencyP95": {
+        "threshold": 1
+      }
+    },
+    "ap-use2-main-user-mgmt": {
+      "4xx": {
+        "threshold": 200
+      }
+    }
+  }
+}
