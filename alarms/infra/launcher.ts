@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import { ResourceName, AwsService, Plane } from '@cmd-saas/libs-infra-resource';
 import { ObservePlaneDomain } from './domains.js';
+import { SnsStack } from './stacks/sns-stack.js';
 import { AlarmsStack } from './stacks/alarms-stack.js';
 import { loadAlarmEnvConfig, loadResourceInventory, emptyInventory } from './alarm-config.js';
 
@@ -39,40 +40,40 @@ const isDestroy =
   destroyContext === true ||
   (typeof destroyContext === 'string' && destroyContext.toLowerCase() === 'true');
 
-// --- Create stacks from scope inventory files -----------------------------
+// --- CDK env (auto-resolve from credentials if not set) -------------------
+const cdkEnv = (process.env.CDK_DEFAULT_ACCOUNT && process.env.CDK_DEFAULT_REGION)
+  ? { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }
+  : undefined;
+
+// --- SNS Stack (one per environment, shared by all alarm stacks) ----------
+const snsStackName = new ResourceName({
+  plane: Plane.OP,
+  environment,
+  domain: ObservePlaneDomain.METRICS,
+  purposeDescriptor: 'alarms-sns',
+  awsService: AwsService.CLOUDFORMATION,
+}).toString();
+
+const snsStack = new SnsStack(app, snsStackName, {
+  env: cdkEnv,
+  environment,
+  alarmEmail: envConfig.alarmEmail,
+  description: `Observe Plane — Alarm SNS topic (${environment})`,
+});
+
+// --- Create alarm stacks from scope inventory files -----------------------
 const multiDir = path.resolve(alarmsRoot, 'generated/multi');
 const manifestPath = path.join(multiDir, 'manifest.json');
 
 if (isDestroy && !fs.existsSync(manifestPath)) {
-  // Destroy mode without inventory — create a dummy stack so CDK can resolve
-  // the stack name and destroy it. Uses empty inventory.
-  const stackName = new ResourceName({
-    plane: Plane.OP,
-    environment,
-    domain: ObservePlaneDomain.METRICS,
-    purposeDescriptor: 'alarms',
-    awsService: AwsService.CLOUDFORMATION,
-  }).toString();
-
-  new AlarmsStack(app, stackName, {
-    env: {
-      account: process.env.CDK_DEFAULT_ACCOUNT,
-      region: process.env.CDK_DEFAULT_REGION,
-    },
-    environment,
-    alarmEmail: envConfig.alarmEmail,
-    inventory: emptyInventory(),
-    description: `Observe Plane — CloudWatch alarms (${environment})`,
-  });
+  // Destroy mode without inventory — CDK needs at least the SNS stack to destroy.
+  // No alarm stacks to create.
+} else if (!fs.existsSync(manifestPath)) {
+  throw new Error(
+    `Scope manifest not found: ${manifestPath}\n` +
+    `Run: task discover config=<config.json> first.`,
+  );
 } else {
-  // Normal mode: read manifest and create one stack per scope.
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(
-      `Scope manifest not found: ${manifestPath}\n` +
-      `Run: task discover config=<config.json> first.`,
-    );
-  }
-
   const manifest: string[] = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as string[];
 
   for (const scope of manifest) {
@@ -89,16 +90,15 @@ if (isDestroy && !fs.existsSync(manifestPath)) {
       awsService: AwsService.CLOUDFORMATION,
     }).toString();
 
-    new AlarmsStack(app, stackName, {
-      env: {
-        account: process.env.CDK_DEFAULT_ACCOUNT,
-        region: process.env.CDK_DEFAULT_REGION,
-      },
+    const alarmsStack = new AlarmsStack(app, stackName, {
+      env: cdkEnv,
       environment,
-      alarmEmail: envConfig.alarmEmail,
+      topicArn: snsStack.topicArn,
       inventory,
       description: `Observe Plane — CloudWatch alarms (${environment} / ${scope})`,
     });
+
+    alarmsStack.addDependency(snsStack);
   }
 }
 
