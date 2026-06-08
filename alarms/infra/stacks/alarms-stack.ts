@@ -1,8 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import * as path from 'path';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import { fileURLToPath } from 'url';
 import { Construct } from 'constructs';
-import { SnsNotification } from '../constructs/sns-notification.js';
 import { CommonApiGatewayAlarms } from '../constructs/common-apigateway-alarms.js';
 import { CommonAmplifyAlarms } from '../constructs/common-amplify-alarms.js';
 import { CommonLambdaAlarms } from '../constructs/common-lambda-alarms.js';
@@ -23,50 +23,53 @@ import {
 } from '../alarm-config.js';
 
 // Resolve overrides directory relative to this file:
-// observe-plane/alarms/infra/stacks/alarms-stack.ts → ../../overrides/
 const overridesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../overrides');
 
 export interface AlarmsStackProps extends cdk.StackProps {
   /** Environment name (e.g. 'main', 'dev'). */
   readonly environment: string;
-  /** Email address for alarm notifications. */
-  readonly alarmEmail: string;
+  /** ARN of the shared SNS topic (created by the SNS stack). */
+  readonly topicArn: string;
   /** Resource inventory produced by the discover CLI. */
   readonly inventory: ResourceInventory;
 }
 
 /**
- * Single CloudFormation stack for all CloudWatch alarms in one environment.
- * Naming follows the same ResourceName convention as the dashboard stack.
- *
- * Contents:
- *   - SnsNotification          — shared SNS topic + email subscription
- *   - CommonApiGatewayAlarms   — 4xx, 5xx, latency p95 alarms per API+stage
+ * CloudFormation stack for CloudWatch alarms in one scope.
+ * References the shared SNS topic by ARN — does not create its own.
  */
 export class AlarmsStack extends cdk.Stack {
-  public readonly snsNotification: SnsNotification;
-
   constructor(scope: Construct, id: string, props: AlarmsStackProps) {
     super(scope, id, props);
 
-    const { environment, alarmEmail, inventory } = props;
+    const { environment, topicArn, inventory } = props;
 
-    // Shared SNS topic — one per environment, used by all alarm constructs.
-    this.snsNotification = new SnsNotification(this, 'SnsNotification', {
-      environment,
-      alarmEmail,
-    });
+    // Null-safe resource access
+    const res = inventory.resources ?? ({} as any);
+    const resources = {
+      lambdas: res.lambdas ?? [],
+      apiGateways: res.apiGateways ?? [],
+      dynamoDBTables: res.dynamoDBTables ?? [],
+      sqsQueues: res.sqsQueues ?? [],
+      ecsClusters: res.ecsClusters ?? [],
+      eventBuses: res.eventBuses ?? [],
+      s3Buckets: res.s3Buckets ?? [],
+      amplifyApps: res.amplifyApps ?? [],
+      cognitoUserPools: res.cognitoUserPools ?? [],
+    };
+
+    // Import the shared SNS topic by ARN.
+    const alarmTopic = sns.Topic.fromTopicArn(this, 'AlarmTopic', topicArn);
 
     // Load optional API Gateway overrides file.
     const apiGatewayOverrides: ApiGatewayOverrides | undefined = loadApiGatewayOverrides(
       path.join(overridesDir, 'apigateway.json'),
     );
 
-    // API Gateway alarms — one set of alarms per API+stage in the inventory.
-    if (inventory.resources.apiGateways.length > 0) {
+    if (resources.apiGateways.length > 0) {
       new CommonApiGatewayAlarms(this, 'ApiGatewayAlarms', {
-        apis: inventory.resources.apiGateways,
-        alarmTopic: this.snsNotification.topic,
+        apis: resources.apiGateways,
+        alarmTopic,
         overrides: apiGatewayOverrides,
         environment,
         region: this.region,
@@ -78,11 +81,10 @@ export class AlarmsStack extends cdk.Stack {
       path.join(overridesDir, 'amplify.json'),
     );
 
-    // Amplify alarms — one set of alarms per app in the inventory.
-    if (inventory.resources.amplifyApps.length > 0) {
+    if (resources.amplifyApps.length > 0) {
       new CommonAmplifyAlarms(this, 'AmplifyAlarms', {
-        apps: inventory.resources.amplifyApps,
-        alarmTopic: this.snsNotification.topic,
+        apps: resources.amplifyApps,
+        alarmTopic,
         overrides: amplifyOverrides,
         environment,
         region: this.region,
@@ -94,11 +96,10 @@ export class AlarmsStack extends cdk.Stack {
       path.join(overridesDir, 'lambda.json'),
     );
 
-    // Lambda alarms — one set of alarms per function in the inventory.
-    if (inventory.resources.lambdas.length > 0) {
+    if (resources.lambdas.length > 0) {
       new CommonLambdaAlarms(this, 'LambdaAlarms', {
-        functions: inventory.resources.lambdas,
-        alarmTopic: this.snsNotification.topic,
+        functions: resources.lambdas,
+        alarmTopic,
         overrides: lambdaOverrides,
         environment,
         region: this.region,
@@ -110,11 +111,10 @@ export class AlarmsStack extends cdk.Stack {
       path.join(overridesDir, 'cognito.json'),
     );
 
-    // Cognito alarms — one set of alarms per user pool in the inventory.
-    if (inventory.resources.cognitoUserPools.length > 0) {
+    if (resources.cognitoUserPools.length > 0) {
       new CommonCognitoAlarms(this, 'CognitoAlarms', {
-        pools: inventory.resources.cognitoUserPools,
-        alarmTopic: this.snsNotification.topic,
+        pools: resources.cognitoUserPools,
+        alarmTopic,
         overrides: cognitoOverrides,
         environment,
         region: this.region,
@@ -126,11 +126,10 @@ export class AlarmsStack extends cdk.Stack {
       path.join(overridesDir, 'dynamodb.json'),
     );
 
-    // DynamoDB alarms — one set of alarms per table in the inventory.
-    if (inventory.resources.dynamoDBTables.length > 0) {
+    if (resources.dynamoDBTables.length > 0) {
       new CommonDynamoDBAlarms(this, 'DynamoDBAlarms', {
-        tables: inventory.resources.dynamoDBTables,
-        alarmTopic: this.snsNotification.topic,
+        tables: resources.dynamoDBTables,
+        alarmTopic,
         overrides: dynamoDBOverrides,
         environment,
         region: this.region,
