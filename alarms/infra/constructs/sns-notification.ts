@@ -48,7 +48,6 @@ export class SnsNotification extends Construct {
     new cdk.CfnOutput(this, 'AlarmTopicArn', {
       value: this.topic.topicArn,
       description: `SNS topic ARN for CloudWatch alarms (${environment})`,
-      exportName: `observe-plane-alarms-topic-arn-${environment}`,
     });
   }
 }
