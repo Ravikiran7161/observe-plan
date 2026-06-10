@@ -1,0 +1,62 @@
+{
+  "logAlarms": [
+    {
+      "logGroup": "API-Gateway-Execution-Logs_REPLACE_TENANT_MGMT_API_ID/api",
+      "filters": [
+        {
+          "name": "unauthorized-access",
+          "pattern": "\"Unauthorized\"",
+          "threshold": 10,
+          "periodMinutes": 5
+        },
+        {
+          "name": "integration-timeout",
+          "pattern": "\"Endpoint request timed out\"",
+          "threshold": 3,
+          "periodMinutes": 5
+        },
+        {
+          "name": "integration-error",
+          "pattern": "\"Execution failed due to configuration error\"",
+          "threshold": 1,
+          "periodMinutes": 5
+        },
+        {
+          "name": "forbidden-access",
+          "pattern": "\"FORBIDDEN\"",
+          "threshold": 5,
+          "periodMinutes": 5
+        },
+        {
+          "name": "internal-server-error",
+          "pattern": "\"INTERNAL_ERROR\"",
+          "threshold": 3,
+          "periodMinutes": 5
+        }
+      ]
+    },
+    {
+      "logGroup": "API-Gateway-Execution-Logs_REPLACE_REPORTING_API_ID/api",
+      "filters": [
+        {
+          "name": "export-lambda-invoke-failed",
+          "pattern": "\"failed to invoke export-pdf-lambda\"",
+          "threshold": 1,
+          "periodMinutes": 5
+        },
+        {
+          "name": "drive-integration-failed",
+          "pattern": "\"Failed to retrieve report streams from Drive\"",
+          "threshold": 3,
+          "periodMinutes": 5
+        },
+        {
+          "name": "auth-context-missing",
+          "pattern": "\"missing auth context field\"",
+          "threshold": 5,
+          "periodMinutes": 5
+        }
+      ]
+    }
+  ]
+}
